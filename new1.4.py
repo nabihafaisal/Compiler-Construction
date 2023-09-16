@@ -1,0 +1,355 @@
+import re
+from prettytable import PrettyTable
+
+
+class LexicalError(Exception):
+    pass
+
+
+class Tokenizer:
+    @staticmethod
+    def new_token_regex(regex):
+        newline = r'\n'
+        return f'^({regex})$(?!{newline})'
+
+    @staticmethod
+    def define_tokens():
+        # Define regular expressions for various tokens
+        letter = '[a-zA-Z]'
+        digit = '[0-9]'
+        non_zero_digit = '[1-9]'
+        newline = r'\n'
+        dot = '\.'
+
+        # Regular expressions for different types of strings
+        str_single_quotes = f"'[^'{newline}]*'?"
+        str_double_quotes = f'"[^"{newline}]*"?'
+        str_three_single_quotes = f"'''((?!''').|{newline})*(''')?"
+        str_three_double_quotes = f'"""((?!""").|{newline})*(""")?'
+        Tokenizer.escapeCodesForString = {"'": "__x20__", '"': "__x21__"}
+        # Define Python keywords, operators, and delimiters
+        Tokenizer.keywords = ['False', 'await', 'else', 'import', 'pass', 'None','range',
+                              'break', 'except', 'in', 'raise', 'True', 'class',
+                              'finally', 'is', 'return', 'and', 'continue', 'for',
+                              'lambda', 'try', 'as', 'def', 'from', 'print',
+                              'while', 'assert', 'del', 'global', 'not', 'with',
+                              'async', 'elif', 'if', 'or', 'yield']
+
+        Tokenizer.operators = ['+', '-', '*', '**', '/', '//', '%', '@', '<<', '>>', '&',
+                               '|', '^', '~', ':=', '<', '>', '<=', '>=', '==', '!=']
+
+        # Tokenizer.delimiters = ['(', ')', '[', ']', '{', '}', ',', ':', '.', ';', '@', '=',
+        #                         '->', '+=', '-=', '*=', '/=', '//=', '%=', '@=', '&=', '|=',
+        #                         '^=', '>>=', '<<=', '**=']
+        Tokenizer.openbrackets = ['(',  '{',  '[', ]
+        Tokenizer.closebrackets = [')',  '}', ']']
+        Tokenizer.datatypes = ['int', 'float',
+                               'char', 'string', 'bool', 'void']
+        Tokenizer.punctuators = [',', ';', ':', '.']
+        Tokenizer.PM = ['+', '-']
+        Tokenizer.MDM = ['*', '/', '%']
+        Tokenizer.logical_operators = ['!', '&', '|']
+        Tokenizer.assignment = ['=']
+        Tokenizer.relational_operators = [
+            '<', '>', '<=', '>=', '!=', '==', '<<', '>>']
+        Tokenizer.assignment_operators = ['+=', '-=', '==', '*=', '%=']
+        Tokenizer.boolean_constants = ['True', 'False']
+        Tokenizer.inc_dec = ['--', '++']
+
+        # Define regular expressions for different tokens
+        Tokenizer.identifier = Tokenizer.new_token_regex(
+            f'({letter}|_)({letter}|{digit}|_)*')
+        Tokenizer.integer = Tokenizer.new_token_regex(
+            f'{non_zero_digit}{digit}*|0')
+        Tokenizer.float = Tokenizer.new_token_regex(
+            f'({digit}+|(?={dot}{digit})){dot}({digit}+|(?<={digit}{dot}))')
+        Tokenizer.string = Tokenizer.new_token_regex(f'{str_single_quotes}|{str_double_quotes}|'
+                                                     f'{str_three_single_quotes}|{str_three_double_quotes}')
+        Tokenizer.comment = Tokenizer.new_token_regex(f'#[^{newline}]*')
+
+    def __init__(self, file_handler):
+        self.file_handler = file_handler
+        self.line_num = 1
+        self.col_num = 1
+        self.start_line_num = 1
+        self.start_col_num = 1
+        self.token_buffer = ''
+
+    def increment_pointer(self):
+        # Move the file pointer to the next character and update line and column numbers
+        ch = self.file_handler.read(1)
+        if ch == '\n':
+            self.line_num += 1
+            self.col_num = 1
+        else:
+            self.col_num += 1
+
+    def get_next_character(self):
+        # Get the next character without advancing the file pointer
+        curr_offset = self.file_handler.tell()
+        ch = self.file_handler.read(1)
+        if (ch == 'd'):
+            print()
+        self.file_handler.seek(curr_offset)
+        return ch
+
+    def get_prev_character(self):
+        # Get the next character without advancing the file pointer
+        curr_offset = self.file_handler.tell()
+        self.file_handler.seek(curr_offset-1)
+        ch = self.file_handler.read(1)
+        if (ch == 'd'):
+            print()
+        self.file_handler.seek(curr_offset)
+        return ch
+
+    def get_next_token(self):
+        # Initialize token position and type
+        self.start_line_num = self.line_num
+        self.start_col_num = self.col_num
+        token = ''
+        token_name = ''
+
+        while True:
+            ch = self.get_next_character()
+            self.token_buffer += ch
+
+            # Check if we have reached the end of the file
+            if not ch:
+                if token_name == 'INCOMPLETE STRING':
+                    raise LexicalError('Incomplete string reached EOF')
+                return token, token_name
+
+            if self.token_buffer in Tokenizer.datatypes:
+                token = self.token_buffer
+                token_name = 'DATATYPE'
+                self.increment_pointer()
+                continue
+
+            # Compare the token buffer with regular expressions for different tokens
+            if self.token_buffer in Tokenizer.keywords:
+                token = self.token_buffer
+                token_name = 'KEYWORD'
+                self.increment_pointer()
+                continue
+
+            if re.search(Tokenizer.identifier, self.token_buffer):
+                token = self.token_buffer
+                token_name = 'IDENTIFIER'
+                self.increment_pointer()
+                continue
+
+            if re.search(Tokenizer.integer, self.token_buffer):
+                token = self.token_buffer
+                token_name = 'INTEGER'
+                self.increment_pointer()
+                continue
+
+            if re.search(Tokenizer.float, self.token_buffer):
+                token = self.token_buffer
+                token_name = 'FLOAT'
+                self.increment_pointer()
+                continue
+
+            if re.search(Tokenizer.string, self.token_buffer):
+                if ((ch == '"' or ch == "'") and self.get_prev_character() == '\\'):
+                    code = Tokenizer.escapeCodesForString[ch]
+                    new_str = ""
+                    for i in range(len(self.token_buffer)-2):
+                        new_str += self.token_buffer[i]
+                    new_str += code
+                    self.token_buffer = new_str
+                    token = self.token_buffer
+                    self.increment_pointer()
+                    continue
+
+                if len(self.token_buffer) >= 2 and self.token_buffer.startswith("'") and self.token_buffer.endswith("'"):
+                    if len(self.token_buffer) == 3:# or len(self.token_buffer) == 4:
+                        token = self.token_buffer
+                        token_name = 'CHARACTER'
+                        self.increment_pointer()
+                    else:
+                        raise LexicalError('Invalid character literal')
+
+                elif len(self.token_buffer) >= 2 and self.token_buffer.startswith('"') and self.token_buffer.endswith('"'):
+                    escaped = False
+                    string_content = ''
+                    stringWithoutQoutes = self.token_buffer[1:-1]
+                    # Exclude the surrounding double quotes
+                    for i in range(len(stringWithoutQoutes)):
+                        # Exclude the surrounding double quotes
+                        ch = stringWithoutQoutes[i]
+                        if escaped:
+                            # If we are in an escaped state, add the current character as-is, excluding the backslash
+                            if ch != '\\':
+                                string_content += '\\'
+                            string_content += ch
+                            escaped = False
+                        else:
+                            if ch == '\\':
+                                # If we encounter a backslash, set the escaped state
+                                escaped = True
+                                if (i == len(stringWithoutQoutes)-1):
+                                    # string_content += "\\"
+                                    escaped = not escaped
+                            else:
+                                # Otherwise, add the character to the string content
+                                string_content += ch
+
+                    if not escaped:
+                        # If the last character was not part of an escape sequence, the string is complete
+                        # Print the string content without the backslash if it's just before the closing quotes
+                        keys = list(Tokenizer.escapeCodesForString.keys())
+                        values = list(Tokenizer.escapeCodesForString.values())
+                        for i in range(len(values)):
+                            value = values[i]
+                            key = keys[i]
+                            string_content = string_content.replace(value, key)
+                        token = f'"{string_content}"'
+                        token_name = 'STRING'
+                        self.increment_pointer()
+                        continue
+
+                elif len(self.token_buffer) >= 2 and self.token_buffer.startswith('"') and self.token_buffer.endswith('"') or \
+                        len(self.token_buffer) >= 6 and self.token_buffer.startswith("'''") and self.token_buffer.endswith("'''") or \
+                        len(self.token_buffer) >= 6 and self.token_buffer.startswith('"""') and self.token_buffer.endswith('"""'):
+                    token = self.token_buffer
+                    token_name = 'STRING'
+                    self.increment_pointer()
+                    continue
+
+                else:
+                    token = self.token_buffer
+                    token_name = 'INCOMPLETE STRING'
+                    self.increment_pointer()
+                    continue
+
+            if re.search(Tokenizer.comment, self.token_buffer):
+                token = self.token_buffer
+                token_name = 'COMMENT'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.openbrackets:
+                token = self.token_buffer
+                token_name = self.token_buffer
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.closebrackets:
+                token = self.token_buffer
+                token_name = self.token_buffer
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.PM:
+                token = self.token_buffer
+                token_name = 'PM'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.MDM:
+                token = self.token_buffer
+                token_name = 'MDM'
+                self.increment_pointer()
+                continue
+
+            if self.token_buffer in Tokenizer.punctuators:
+                token = self.token_buffer
+                token_name = 'PUNCTUATOR'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.assignment:
+                token = self.token_buffer
+                token_name = 'assignment'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.logical_operators:
+                token = self.token_buffer
+                token_name = 'LOGICAL_OPERATOR'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.assignment_operators:
+                token = self.token_buffer
+                token_name = 'ASSIGNMENT_OPERATOR'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.inc_dec:
+                token = self.token_buffer
+                token_name = 'INCREMENT_DECREMENT'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.boolean_constants:
+                token = self.token_buffer
+                token_name = 'BOOLEAN_CONSTANT'
+                self.increment_pointer()
+                continue
+            if self.token_buffer in Tokenizer.relational_operators:
+                token = self.token_buffer
+                token_name = 'relational operator'
+                self.increment_pointer()
+                continue
+
+            # Check for lexical errors
+            if token_name == 'INTEGER':
+                if re.search('[a-zA-Z]', ch):
+                    raise LexicalError('Invalid lexeme')
+
+            if token_name == 'FLOAT':
+                if re.search('[a-zA-Z]', ch):
+                    raise LexicalError('Invalid lexeme')
+
+            if token_name == 'INCOMPLETE STRING':
+                if ch == '\n' and len(self.token_buffer) >= 3:
+                    keys = list(Tokenizer.escapeCodesForString.keys())
+                    values = list(Tokenizer.escapeCodesForString.values())
+                    for i in range(len(values)):
+                        value = values[i]
+                        key = keys[i]
+                        string_content = self.token_buffer.replace(value, key)
+                    token = f'{string_content}'
+                    token_name = 'Invalid lexeme'
+                    
+
+            # If there is no lexical error, return the token formed so far without consuming the current character
+            self.token_buffer = ''
+            return token, token_name
+
+
+if __name__ == '__main__':
+    # Define the regular expressions for tokens
+    Tokenizer.define_tokens()
+
+    # Create a PrettyTable instance with column headers
+    table = PrettyTable()
+    table.field_names = ["Type", "Token", "Line"]
+
+    with open('example.txt') as file_handler:
+        t = Tokenizer(file_handler)
+
+        # Print all tokens, including lexical errors, until the end of the file
+        while True:
+            try:
+                # Skip whitespace characters
+                while re.search('\s', t.get_next_character()):
+                    t.increment_pointer()
+
+                ch = t.get_next_character()
+
+                # Check if we have reached the end of the file
+                if not ch:
+                    break
+
+                token, token_name = t.get_next_token()
+
+                # Add tokens to the table
+                if token_name != 'COMMENT':
+                    table.add_row([token_name, token, t.start_line_num])
+
+            except LexicalError as e:
+                # Print lexical error
+                print(f'Lexical error: {e} - Line: {t.start_line_num}')
+                t.token_buffer = ''
+
+                # Ignore characters until we reach whitespace characters
+                while re.search('\S', t.get_next_character()):
+                    t.increment_pointer()
+
+    # Print the table
+    print(table)
